@@ -223,6 +223,8 @@ class Lexer:
                     self._status = Lexer._Status.WAIT_NEXT_TOKEN
                 elif ch == '`':
                     self._status = Lexer._Status.STRING_ESCAPING
+                elif ch == '':
+                    raise RuntimeError()
                 else:
                     pass
             elif self._status == Lexer._Status.STRING_ESCAPING:
