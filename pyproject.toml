@@ -8,9 +8,8 @@ version = "0.0.0"
 description = "Read and write files in Zen Markup Language."
 readme = "README.md"
 authors = [{ name = "shi0rik0" }]
-license = { file = "LICENSE" }
 classifiers = [
-    "LICENSE :: OSI APPROVED :: GNU AFFERO GENERAL PUBLIC LICENSE V3",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
 ]
