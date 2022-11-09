@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zen_markup_lang"
-version = "0.0.1"
+version = "0.1.0"
 description = "Read and write files in Zen Markup Language."
 readme = "README.md"
 authors = [{ name = "shi0rik0" }]
