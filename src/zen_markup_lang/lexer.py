@@ -1,43 +1,97 @@
-from io import TextIOWrapper
-from typing import Optional, Tuple, Union
-from dataclasses import dataclass
-from .reader import Reader
+from copy import deepcopy
 from enum import Enum
+from typing import Tuple, Union
+from .ply import lex
+
+# List of token names.   This is always required
+tokens = (
+    'START_TAG',
+    'END_TAG',
+    'INT',
+    'FLOAT',
+    'STR',
+    'BOOL',
+    'NULL',
+    'EMPTY_ARR',
+    'EMPTY_OBJ',
+    'COMMENT',
+)
+
+# Regular expression rules for simple tokens
+t_START_TAG = r'<([_a-zA-Z][_a-zA-Z0-9]*)?>'
+t_END_TAG = r'</([_a-zA-Z][_a-zA-Z0-9]*)?>'
+t_INT = r'0_*|[1-9][_0-9]*'
+t_FLOAT = r'(0_*|[1-9][_0-9]*)\._*[0-9][_0-9]*'
+t_STR = r'"([^\\\n"]|\\\\|\\"|\\n|\\b|\\t)*"|`[^\n`]*`'
+t_BOOL = 'true|false'
+t_NULL = 'null'
+t_EMPTY_ARR = 'empty_arr'
+t_EMPTY_OBJ = 'empty_obj'
 
 
-@dataclass
-class ZmlVersion:
-    major: int
-    minor: int
+def t_COMMENT(t):
+    r'\#[^\n]*\n'
+    t.lexer.lineno += 1
+
+# A regular expression rule with some action code
+
+
+# def t_NUMBER(t):
+#     r'\d+'
+#     t.value = int(t.value)
+#     return t
+
+# Define a rule so we can track line numbers
+
+
+def t_newline(t):
+    r'\n+'
+    t.lexer.lineno += len(t.value)
+
+
+# A string containing ignored characters (spaces and tabs)
+t_ignore = ' \t\r'
+
+# Error handling rule
+
+
+def t_error(t):
+    raise RuntimeError(f'illegal character {t.value[0]} in line {t.lineno}')
+
+
+# Build the lexer
+lexer = lex.lex()
+
+
+escaping = {
+    't': '\t',
+    'n': '\n',
+    'b': '\b',
+    '"': '"',
+    '\\': '\\',
+}
+
+
+def string_literal(s: str) -> str:
+    if s[0] == '"':
+        builder = []
+        i = 1
+        while True:
+            j = s.find('\\', i)
+            if j == -1:
+                builder.append(s[i:-1])
+                break
+            builder.append(s[i:j])
+            builder.append(escaping[s[j+1]])
+            i = j + 2
+        return ''.join(builder)
+    elif s[0] == '`':
+        return s[1:-1]
+    else:
+        raise RuntimeError()
 
 
 class Lexer:
-    class _Status(Enum):
-        WAIT_NEXT_TOKEN = 0
-
-        # Reading a start tag or an end tag.
-        TAG_START = 1
-        END_TAG_START = 2
-        TAG_CONTENT = 3
-
-        # Reading a number.
-        NUMBER_0 = 4
-        NUMBER_1_9 = 5
-        NUMBER_DOT_0 = 6
-        NUMBER_DOT_1 = 7
-
-        # Reading true, false and null.
-        TRUE = 8
-        FALSE = 9
-        NULL = 10
-
-        # Reading a string.
-        STRING_NORMAL = 11
-        STRING_ESCAPING = 12
-
-        # Reading empty_obj and empty_arr
-        EMPTY_OBJ_ARR = 13
-
     class Token(Enum):
         START_TAG = 0
         END_TAG = 1
@@ -51,265 +105,41 @@ class Lexer:
         EMPTY_OBJ = 8
         EMPTY_ARR = 9
 
-    def __init__(self, readable: TextIOWrapper):
-        self._reader = Reader(readable)
-        self._status = Lexer._Status.WAIT_NEXT_TOKEN
+    _str_to_token = {'START_TAG': Token.START_TAG, 'END_TAG': Token.END_TAG, 'INT': Token.INT, 'FLOAT': Token.FLOAT, 'STR': Token.STRING,
+                     'BOOL': Token.BOOL, 'NULL': Token.NULL, 'EMPTY_ARR': Token.EMPTY_ARR, 'EMPTY_OBJ': Token.EMPTY_OBJ}
 
-    # Some char sets.
-    _BLANK = {' ', '\t', '\n'}
-    _DIGITS = {chr(ord('0') + i) for i in range(10)}
-    _ALPHABET = {chr(ord('a') + i)
-                 for i in range(26)} | {chr(ord('A') + i) for i in range(26)}
-    _ID_START = {'_'} | _ALPHABET
-    _ID_REST = {'_'} | _ALPHABET | _DIGITS
-    _DIGITS_1_9 = {chr(ord('0') + i) for i in range(1, 10)}
-    _DIGITS_AND_UNDERSCORE = {'_'} | _DIGITS
-    _ESCAPING_CHARACTERS = {'n', 'r', 'b', 't', '`'}
+    def __init__(self) -> None:
+        self._lexer = deepcopy(lexer)
 
-    def get_version(self) -> ZmlVersion:
-        pieces = []
-        while True:
-            ch = self._reader.read_char()
-            pieces.append(ch)
-            if ch == '>':
-                break
-        s = ''.join(pieces)
-        i = s.find('<')
-        if i == -1 or not all(x in Lexer._BLANK for x in s[:i]):
-            raise RuntimeError()
-        t = s[i+1:-1].split(' ')
-        if len(t) != 2 or t[0] != '!zml':
-            raise RuntimeError()
-        t = t[1].split('.')
-        if len(t) != 2:
-            raise RuntimeError()
-        try:
-            return ZmlVersion(major=int(t[0]), minor=int(t[1]))
-        except ValueError as e:
-            raise RuntimeError()
+    def input(self, s: str) -> None:
+        self._lexer.input(s)
 
     def get_token(self) -> Tuple[Union[str, bool, None, int, float], Token]:
-        # Skip spaces and comments.
-        while True:
-            ch = self._reader.read_char()
-            if ch == '':
-                return (None, Lexer.Token.EOF)
-            elif ch == '#':
-                while True:
-                    ch = self._reader.read_char()
-                    if ch == '\n':
-                        break
-                    elif ch == '':
-                        return (None, Lexer.Token.EOF)
-            elif ch not in Lexer._BLANK:
-                self._reader.go_back()
-                break
+        tok = self._lexer.token()
+        if not tok:
+            return [None, Lexer.Token.EOF]
+        kind = Lexer._str_to_token[tok.type]
+        content: str = tok.value
 
-        self._reader.cut()
-        ch = self._reader.read_char()
-
-        if ch == '<':
-            self._status = Lexer._Status.TAG_START
-            kind = Lexer.Token.START_TAG
-        elif ch == '0':
-            self._status = Lexer._Status.NUMBER_0
-            kind = Lexer.Token.INT
-        elif ch in Lexer._DIGITS_1_9:
-            self._status = Lexer._Status.NUMBER_1_9
-            kind = Lexer.Token.INT
-        elif ch == 't':
-            self._status = Lexer._Status.TRUE
-            kind = Lexer.Token.BOOL
-        elif ch == 'f':
-            self._status = Lexer._Status.FALSE
-            kind = Lexer.Token.BOOL
-        elif ch == 'n':
-            self._status = Lexer._Status.NULL
-            kind = Lexer.Token.NULL
-        elif ch == 'e':
-            self._status = Lexer._Status.EMPTY_OBJ_ARR
-            kind = Lexer.Token.NULL
+        T = Lexer.Token
+        if kind == T.START_TAG:
+            content = content[1:-1]
+        elif kind == T.END_TAG:
+            content = content[2:-1]
+        elif kind == T.INT:
+            content = int(content.replace('_', ''))
+        elif kind == T.FLOAT:
+            content = float(content.replace('_', ''))
+        elif kind == T.STRING:
+            content = string_literal(content)
+        elif kind == T.BOOL:
+            content = True if content[0] == 't' else False
+        elif kind == T.NULL:
+            content = None
+        elif kind == T.EMPTY_ARR:
+            content = []
+        elif kind == T.EMPTY_OBJ:
+            content = {}
         else:
-            self._status = Lexer._Status.STRING_NORMAL
-            kind = Lexer.Token.STRING
-            str_symbol = ch
-
-        while self._status != Lexer._Status.WAIT_NEXT_TOKEN:
-            ch = self._reader.read_char()
-
-            # Read tags.
-            if self._status == Lexer._Status.TAG_START:
-                if ch == '/':
-                    self._status = Lexer._Status.END_TAG_START
-                    kind = Lexer.Token.END_TAG
-                elif ch in Lexer._ID_START:
-                    self._status = Lexer._Status.TAG_CONTENT
-                elif ch == '>':
-                    self._status = Lexer._Status.WAIT_NEXT_TOKEN
-                else:
-                    return ('error', Lexer.Token.ERROR)
-            elif self._status == Lexer._Status.END_TAG_START:
-                if ch in Lexer._ID_START:
-                    self._status = Lexer._Status.TAG_CONTENT
-                elif ch == '>':
-                    self._status = Lexer._Status.WAIT_NEXT_TOKEN
-                else:
-                    return ('error', Lexer.Token.ERROR)
-            elif self._status == Lexer._Status.TAG_CONTENT:
-                if ch in Lexer._ID_REST:
-                    pass
-                elif ch == '>':
-                    self._status = Lexer._Status.WAIT_NEXT_TOKEN
-                else:
-                    return ('error', Lexer.Token.ERROR)
-
-            # Read numbers.
-            elif self._status == Lexer._Status.NUMBER_0:
-                if ch == '.':
-                    self._status = Lexer._Status.NUMBER_DOT_0
-                    kind = Lexer.Token.FLOAT
-                elif ch == '_':
-                    pass
-                else:
-                    self._reader.go_back()
-                    self._status = Lexer._Status.WAIT_NEXT_TOKEN
-            elif self._status == Lexer._Status.NUMBER_1_9:
-                if ch == '.':
-                    self._status = Lexer._Status.NUMBER_DOT_0
-                    kind = Lexer.Token.FLOAT
-                elif ch in Lexer._DIGITS_AND_UNDERSCORE:
-                    pass
-                else:
-                    self._reader.go_back()
-                    self._status = Lexer._Status.WAIT_NEXT_TOKEN
-            elif self._status == Lexer._Status.NUMBER_DOT_0:
-                if ch in Lexer._DIGITS:
-                    self._status = Lexer._Status.NUMBER_DOT_1
-                elif ch == '_':
-                    pass
-                else:
-                    return ('error', Lexer.Token.ERROR)
-            elif self._status == Lexer._Status.NUMBER_DOT_1:
-                if ch in Lexer._DIGITS_AND_UNDERSCORE:
-                    pass
-                else:
-                    self._reader.go_back()
-                    self._status = Lexer._Status.WAIT_NEXT_TOKEN
-
-            # Read true, false and null.
-            elif self._status == Lexer._Status.TRUE:
-                rest = 'rue'
-                if ch != rest[0]:
-                    return ('error', Lexer.Token.ERROR)
-                for i in rest[1:]:
-                    ch = self._reader.read_char()
-                    if ch != i:
-                        return ('error', Lexer.Token.ERROR)
-                self._status = Lexer._Status.WAIT_NEXT_TOKEN
-            elif self._status == Lexer._Status.FALSE:
-                rest = 'alse'
-                if ch != rest[0]:
-                    return ('error', Lexer.Token.ERROR)
-                for i in rest[1:]:
-                    ch = self._reader.read_char()
-                    if ch != i:
-                        return ('error', Lexer.Token.ERROR)
-                self._status = Lexer._Status.WAIT_NEXT_TOKEN
-            elif self._status == Lexer._Status.NULL:
-                rest = 'ull'
-                if ch != rest[0]:
-                    return ('error', Lexer.Token.ERROR)
-                for i in rest[1:]:
-                    ch = self._reader.read_char()
-                    if ch != i:
-                        return ('error', Lexer.Token.ERROR)
-                self._status = Lexer._Status.WAIT_NEXT_TOKEN
-
-            # Read a string.
-            elif self._status == Lexer._Status.STRING_NORMAL:
-                if ch == str_symbol:
-                    self._status = Lexer._Status.WAIT_NEXT_TOKEN
-                elif ch == '`':
-                    self._status = Lexer._Status.STRING_ESCAPING
-                elif ch == '':
-                    raise RuntimeError()
-                else:
-                    pass
-            elif self._status == Lexer._Status.STRING_ESCAPING:
-                if ch in Lexer._ESCAPING_CHARACTERS or ch == str_symbol:
-                    self._status = Lexer._Status.STRING_NORMAL
-                else:
-                    raise RuntimeError()
-
-            # Read empty_obj or empty_arr
-            elif self._status == Lexer._Status.EMPTY_OBJ_ARR:
-                rest = [ch]
-                for i in range(7):
-                    rest.append(self._reader.read_char())
-                s = ''.join(rest)
-                if s == 'mpty_obj':
-                    kind = Lexer.Token.EMPTY_OBJ
-                    self._status = Lexer._Status.WAIT_NEXT_TOKEN
-                elif s == 'mpty_arr':
-                    kind = Lexer.Token.EMPTY_ARR
-                    self._status = Lexer._Status.WAIT_NEXT_TOKEN
-                else:
-                    raise RuntimeError()
-
-            else:
-                raise RuntimeError()
-
-        content = self._reader.cut()
-        if kind == Lexer.Token.START_TAG:
-            return (content[1:-1], kind)
-        elif kind == Lexer.Token.END_TAG:
-            return (content[2:-1], kind)
-        elif kind == Lexer.Token.INT:
-            s = ''.join(filter(lambda x: x != '_', content))
-            return (int(s), kind)
-        elif kind == Lexer.Token.FLOAT:
-            s = ''.join(filter(lambda x: x != '_', content))
-            return (float(s), kind)
-        elif kind == Lexer.Token.BOOL:
-            return (True if content[0] == 't' else False, kind)
-        elif kind == Lexer.Token.NULL:
-            return (None, kind)
-        elif kind == Lexer.Token.EOF:
-            return (None, kind)
-        elif kind == Lexer.Token.STRING:
-            return (Lexer._process_escaping_characters(content[1:-1], str_symbol), kind)
-        elif kind == Lexer.Token.EMPTY_OBJ:
-            return ({}, kind)
-        elif kind == Lexer.Token.EMPTY_ARR:
-            return ([], kind)
-        else:
-            raise NotImplementedError()
-
-    @staticmethod
-    def _process_escaping_characters(s: str, str_symbol: str) -> str:
-        pieces = []
-        i = 0
-        j = s.find('`', i)
-        while j != -1:
-            pieces.append(s[i:j])
-            if j + 1 >= len(s):
-                raise RuntimeError()
-            ch = s[j + 1]
-            if ch == 'n':
-                pieces.append('\n')
-            elif ch == 't':
-                pieces.append('\t')
-            elif ch == 'b':
-                pieces.append('\b')
-            elif ch == 'r':
-                pieces.append('\r')
-            elif ch == str_symbol:
-                pieces.append(ch)
-            elif ch == '`':
-                pieces.append('`')
-            else:
-                raise RuntimeError()
-            i = j + 2
-            j = s.find('`', i)
-        pieces.append(s[i:])
-        return ''.join(pieces)
+            raise RuntimeError()
+        return (content, kind)

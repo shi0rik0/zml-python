@@ -1,8 +1,7 @@
 from __future__ import annotations
-from io import TextIOWrapper
+from io import StringIO, TextIOWrapper
 from typing import Any, Dict, List, Tuple, NoReturn, Union
 from .lexer import Lexer
-from .string_stream import InStringStream, OutStringStream
 
 AllTypes = Union['Object', 'Array', str, int, float, bool, None]
 Object = Dict[str, AllTypes]
@@ -31,12 +30,17 @@ class ZmlReader:
                     Lexer.Token.EMPTY_ARR, Lexer.Token.EMPTY_OBJ}
 
     def __init__(self, readable: IReadable):
-        self._lexer = Lexer(readable)
+        self._lexer = Lexer()
+        self._lexer.input(readable.read())
 
     def _read_next(self, key: str) -> Any:
         content, kind = self._lexer.get_token()
         if kind in ZmlReader._TERMINATORS:
             content2, kind2 = self._lexer.get_token()
+            if kind == Lexer.Token.STRING:
+                while kind2 == Lexer.Token.STRING:
+                    content += content2
+                    content2, kind2 = self._lexer.get_token()
             if content2 != key or kind2 != Lexer.Token.END_TAG:
                 raise RuntimeError()
             ret = content
@@ -80,9 +84,9 @@ class ZmlReader:
                 raise RuntimeError()
 
     def read(self) -> Dict:
-        version = self._lexer.get_version()
-        if version.major != 0 or version.minor != 1:
-            raise RuntimeError()
+        # version = self._lexer.get_version()
+        # if version.major != 0 or version.minor != 1:
+        #     raise RuntimeError()
         content, kind = self._lexer.get_token()
         if kind != Lexer.Token.START_TAG:
             raise RuntimeError()
@@ -101,31 +105,31 @@ def is_identifier(s: str) -> bool:
 
 
 def dump(d: Object, fp: IWriteable) -> None:
-    fp.write('<!zml 0.1>\n')
+    # fp.write('<!zml 0.1>\n')
     _dump(d, fp, 0)
 
 
 def dumps(d: Object) -> str:
-    ss = OutStringStream()
+    ss = StringIO()
     dump(d, ss)
-    return ss.get_str()
+    return ss.read()
 
 
 def to_zml_str(s: str) -> str:
     a = ['"']
     for i in s:
-        if i == '`':
-            a.append('``')
+        if i == '\\':
+            a.append('\\\\')
         elif i == '\n':
-            a.append('`n')
+            a.append('\\n')
         elif i == '\t':
-            a.append('`t')
+            a.append('\\t')
         elif i == '\b':
-            a.append('`b')
+            a.append('\\b')
         elif i == '\r':
-            a.append('`r')
+            a.append('\\r')
         elif i == '"':
-            a.append('`"')
+            a.append('\\"')
         else:
             a.append(i)
     a.append('"')
@@ -196,5 +200,5 @@ def load(fp: IReadable) -> Object:
 
 
 def loads(s: str) -> Object:
-    ss = InStringStream(s)
+    ss = StringIO(s)
     return load(ss)

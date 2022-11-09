@@ -1,12 +1,11 @@
-<!zml 0.1>
 <a> 114514 </a>
 <b> 1919.810 </b>
 <c> true </c>
 <d> false </d>
 <e> null </e>
 <f>
-    <> 'hello`t' </>
-    <> !world`!! </>
+    <> "h" "ello\t" </>
+    <> `world!` </>
 </f>
 <g>
     <a> 114514 </a>
@@ -15,8 +14,8 @@
     <d> false </d>
     <e> null </e>
     <f>
-        <> 'hello`t' </>
-        <> !world`!! </>
+        <> "hello\t" </>
+        <> `world!` </>
     </f>
     <h> empty_obj </h>
     <i> empty_arr </i>
