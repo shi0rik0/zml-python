@@ -6,7 +6,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 
 def test_zml():
     t = {'a': 114514, 'b': 1919.81, 'c': True,
-         'd': False, 'e': None, 'f': ['hello\t', 'world!'], 'h': {}, 'i': []}
+         'd': False, 'e': None, 'f': ['hello\t', 'world!\\'], 'h': {}, 'i': []}
     t['g'] = t.copy()
     with open(HERE / 'test.zml') as f:
         assert zml.load(f) == t
